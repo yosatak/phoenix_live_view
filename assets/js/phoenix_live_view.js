@@ -222,8 +222,45 @@ let maybe = (el, key) => {
   }
 }
 
+let gatherFiles = (form) => {
+  const formData = new FormData(form)
+  let files = {}
+  formData.forEach((val, key) => {
+    if (val instanceof File && val.size > 0) {
+      files[key] = val
+    }
+  })
+  return files
+}
+
+
+
+let uploadFiles = (files, channel, callback) => {
+  for(let key in files){
+    let file = files[key]
+    var reader = new FileReader()
+    reader.onload = function(e) {
+      // Todo: Chunk files
+      channel.push("file", {file: e.target.result})
+                  .receive("ok", callback)
+    }
+    reader.readAsArrayBuffer(file)
+  }
+}
+
 let serializeForm = (form) => {
-  let formData = new FormData(form)
+  const formData = new FormData(form)
+  let files = {}
+  let readerCount = 0
+  formData.forEach((val, key) => {
+    if (val instanceof File && val.size > 0) {
+      formData.set(`${key}[name]`, val.name);
+      formData.set(`${key}[type]`, val.type);
+      formData.set(`${key}[size]`, val.size);
+      formData.set(`${key}[__PHX_FILE__]`, "some_ref");
+    }
+  })
+
   let params = new URLSearchParams()
   for(let [key, val] of formData.entries()){ params.append(key, val) }
   return params.toString()
@@ -300,6 +337,42 @@ export let Rendered = {
   }
 }
 
+function writeBinaryString(view, string, offset) {
+  let i = 0;
+  for (i; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i))
+  }
+  return offset + i;
+}
+
+function binaryEncode(message , cb) {
+  const { join_ref, ref, topic, payload: { file } } = message
+  const headerLength = 2;
+  const metaLength = 3 + join_ref.length + ref.length + topic.length;
+  const fileLength = file.byteLength;
+  const buffer = new ArrayBuffer(headerLength + metaLength + fileLength);
+
+
+  const view = new DataView(buffer);
+  view.setUint8(0, 0) // TODO: consider parts here
+  view.setUint8(1, 1)
+  view.setUint8(2, join_ref.length)
+  view.setUint8(3, ref.length)
+  view.setUint8(4, topic.length)
+  let offset = writeBinaryString(view, join_ref, 5);
+  offset = writeBinaryString(view, ref, offset);
+  offset = writeBinaryString(view, topic, offset);
+
+  let i = 0;
+  const arr = new Uint8Array(file);
+  for (0; i < file.byteLength; i++) {
+    view.setUint8(offset + i, arr[i]);
+  }
+
+  cb(view.buffer);
+}
+
+
 // todo document LiveSocket specific options like viewLogger
 export class LiveSocket {
   constructor(url, opts = {}){
@@ -332,6 +405,14 @@ export class LiveSocket {
     window.addEventListener("beforeunload", e => {
       this.unloaded = true
     })
+    const encode = this.socket.encode
+    this.socket.encode = function(message, cb) {
+      if (message.event === "file") {
+        binaryEncode(message, cb)
+      } else {
+        encode(message, cb)
+      }
+    }
     this.bindTopLevelEvents()
   }
 
@@ -813,6 +894,10 @@ let DOM = {
           return false
         }
 
+        // file upload
+        if (fromEl.nodeName === "INPUT" && toEl.nodeName === "INPUT" && fromEl.type === "file") {
+          return false;
+        }
         // nested view handling
         if(DOM.isPhxChild(toEl)){
           let prevStatic = fromEl.getAttribute(PHX_STATIC)
@@ -903,7 +988,14 @@ export class View {
         static: this.getStatic()
       }
     })
+
     this.showLoader(LOADER_TIMEOUT)
+
+    this.uploadChannel = this.liveSocket.channel(`lvu:${this.id}`, () => {
+      return {session: this.getSession()}
+    })
+
+    this.loaderTimer = setTimeout(() => this.showLoader(), LOADER_TIMEOUT)
     this.bindChannel()
   }
 
@@ -1085,6 +1177,8 @@ export class View {
       })
       .receive("error", resp => this.onJoinError(resp))
       .receive("timeout", () => this.onJoinError("timeout"))
+
+    this.uploadChannel.join()
   }
 
   onJoinError(resp){
@@ -1148,11 +1242,27 @@ export class View {
   }
 
   pushFormSubmit(formEl, phxEvent, onReply){
-    this.pushWithReply("event", {
-      type: "form",
-      event: phxEvent,
-      value: serializeForm(formEl)
-    }, onReply)
+    let files = gatherFiles(formEl)
+    if (Object.keys(files).length > 0) {
+      uploadFiles(files, this.uploadChannel, ({ file_ref }) => {
+        this.pushWithReply("event", {
+          type: "form",
+          upload_channel: this.uploadChannel.topic,
+          file_ref,
+          event: phxEvent,
+          value: serializeForm(formEl)
+        }, onReply)
+      });
+      // lock form
+      // upload files
+      // submit
+    } else {
+      this.pushWithReply("event", {
+        type: "form",
+        event: phxEvent,
+        value: serializeForm(formEl)
+      }, onReply)
+    }
   }
 
   pushInternalLink(href, callback){

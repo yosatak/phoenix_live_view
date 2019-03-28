@@ -77,6 +77,21 @@ defmodule Phoenix.LiveView.Channel do
     %{"value" => raw_val, "event" => event, "type" => type} = msg.payload
     val = decode(type, state.socket.router, raw_val)
 
+    val =
+      case msg.payload do
+        %{"file_ref" => file_ref, "upload_channel" => topic} ->
+          # TODO: not this
+          {_, [_ | {%{channels: %{^topic => {pid, _ref}}}, _}], _} = :sys.get_state(state.transport_pid)
+           {:ok, path} = GenServer.call(pid, {:get_file, file_ref})
+
+           # TODO: find/replace the file ref (__PHX_FILE__)
+           subpath = find_file(val, file_ref, [])
+           subpath = ["user", "avatar"]
+           put_in(val, subpath ++ ["path"], path)
+        _ -> val
+      end
+
+
     event
     |> view_module(state).handle_event(val, state.socket)
     |> handle_result({:handle_event, 3, msg.ref}, state)
@@ -549,5 +564,17 @@ defmodule Phoenix.LiveView.Channel do
 
   defp post_mount_prune(%{socket: socket} = state) do
     %{state | socket: View.post_mount_prune(socket)}
+
+  @doc false
+  def find_file(%{"__PHX_FILE__" => ref}, _ref, path), do: path
+  def find_file(params, _ref, path) when not is_map(params), do: nil
+
+  def find_file(params, _ref, path) do
+    Enum.reduce_while(params, path, fn {key, sub_params}, acc ->
+      case find_file(sub_params, _ref, [acc | key]) do
+        nil -> {:cont, acc}
+        path -> {:halt, path}
+      end
+    end)
   end
 end

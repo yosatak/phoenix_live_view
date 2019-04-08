@@ -39,13 +39,18 @@ defmodule Phoenix.LiveView.Channel do
   end
 
   def handle_info({:DOWN, _, :process, maybe_child_pid, _} = msg, %{socket: socket} = state) do
-    case Map.fetch(state.children_pids, maybe_child_pid) do
-      {:ok, id} ->
+    cond do
+      id = Map.get(state.children_pids, maybe_child_pid) ->
         new_pids = Map.delete(state.children_pids, maybe_child_pid)
         new_ids = Map.delete(state.children_ids, id)
         {:noreply, %{state | children_pids: new_pids, children_ids: new_ids}}
 
-      :error ->
+      entry = Enum.find(state.uploads, &match?({_, maybe_child_pid}, &1)) ->
+        {key, _} = entry
+        new_uploads = Map.delete(state.uploads, key)
+        {:noreply, %{state | uploads: new_uploads}}
+
+      true ->
         msg
         |> view_module(state).handle_info(socket)
         |> handle_result({:handle_info, 2, nil}, state)
@@ -73,22 +78,26 @@ defmodule Phoenix.LiveView.Channel do
     end
   end
 
+  def handle_info(%Message{topic: topic, event: "get_upload_ref"} = msg, %{topic: topic} = state) do
+    response = Phoenix.Token.sign(state.socket.endpoint, Phoenix.LiveView.View.configured_signing_salt!(state.socket.endpoint), %{pid: self()})
+    reply(state, msg.ref, :ok, %{ref: response})
+    {:noreply, state}
+  end
+
   def handle_info(%Message{topic: topic, event: "event"} = msg, %{topic: topic} = state) do
     %{"value" => raw_val, "event" => event, "type" => type} = msg.payload
     val = decode(type, state.socket.router, raw_val)
 
-    val =
+    {val, state} =
       case msg.payload do
         %{"file_ref" => file_ref, "upload_channel" => topic} ->
-          # TODO: not this
-          {_, [_ | {%{channels: %{^topic => {pid, _ref}}}, _}], _} = :sys.get_state(state.transport_pid)
+          {pid, uploads} = Map.pop(state.uploads, topic)
            {:ok, path} = GenServer.call(pid, {:get_file, file_ref})
 
            # TODO: find/replace the file ref (__PHX_FILE__)
            subpath = find_file(val, file_ref, [])
-           subpath = ["user", "avatar"]
-           put_in(val, subpath ++ ["path"], path)
-        _ -> val
+           {put_in(val, subpath ++ ["path"], path), %{state | uploads: uploads}}
+        _ -> {val, state}
       end
 
 
@@ -104,6 +113,21 @@ defmodule Phoenix.LiveView.Channel do
   end
 
   @impl true
+  def handle_call({@prefix, :ping}, _from, state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call({@prefix, :register_file_upload, %{pid: pid, ref: ref}}, _from, state) do
+    Process.monitor(pid)
+    # TODO: get that from config
+    if (Enum.count(state.uploads)) > 0 do
+      {:error, :limit_exceeded}
+    else
+      state = %{state | uploads: Map.put(state.uploads, ref, pid)}
+      {:reply, :ok, state}
+    end
+  end
+
   def handle_call({@prefix, :ping}, _from, state) do
     {:reply, :ok, state}
   end
@@ -499,6 +523,8 @@ defmodule Phoenix.LiveView.Channel do
   defp build_state(%Socket{} = lv_socket, %Phoenix.Socket{} = phx_socket, uri_str) do
     put_uri(%{
       socket: lv_socket,
+      uploads: %{},
+      fingerprints: nil,
       serializer: phx_socket.serializer,
       topic: phx_socket.topic,
       transport_pid: phx_socket.transport_pid,
@@ -566,12 +592,12 @@ defmodule Phoenix.LiveView.Channel do
     %{state | socket: View.post_mount_prune(socket)}
 
   @doc false
-  def find_file(%{"__PHX_FILE__" => ref}, _ref, path), do: path
+  def find_file(%{"__PHX_FILE__" => ref}, _ref, path), do: Enum.reverse(path)
   def find_file(params, _ref, path) when not is_map(params), do: nil
 
   def find_file(params, _ref, path) do
     Enum.reduce_while(params, path, fn {key, sub_params}, acc ->
-      case find_file(sub_params, _ref, [acc | key]) do
+      case find_file(sub_params, _ref, [key | acc]) do
         nil -> {:cont, acc}
         path -> {:halt, path}
       end

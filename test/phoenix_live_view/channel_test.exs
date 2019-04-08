@@ -6,9 +6,9 @@ defmodule Phoenix.LiveView.ChannelTest do
     test "returns the path of the nested file" do
       params = %{
         "user" => %{
-      "avatar" => %{
-    "__PHX_FILE__" => "some_ref"
-    }
+          "avatar" => %{
+            "__PHX_FILE__" => "some_ref"
+          }
         }
       }
 

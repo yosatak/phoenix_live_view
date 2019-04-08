@@ -234,7 +234,10 @@ defmodule Phoenix.LiveView.View do
   defp verify_static_token(_endpoint, nil), do: {:ok, %{assigned_new: []}}
   defp verify_static_token(endpoint, token), do: verify_token(endpoint, token)
 
-  defp verify_token(endpoint, token) do
+  @doc """
+  TODO
+  """
+  def verify_token(endpoint, token) do
     case Phoenix.Token.verify(endpoint, salt(endpoint), token, max_age: @max_session_age) do
       {:ok, {@token_vsn, term}} -> {:ok, term}
       {:ok, _} -> {:error, :outdated}

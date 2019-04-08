@@ -1,6 +1,6 @@
 defmodule Phoenix.LiveView.UploadChannel do
   @moduledoc false
-  use GenServer
+  use Phoenix.Channel
 
   require Logger
 
@@ -9,30 +9,19 @@ defmodule Phoenix.LiveView.UploadChannel do
 
   alias Phoenix.LiveView.UploadFrame
 
-  def start_link({auth_payload, from, phx_socket}) do
-    GenServer.start_link(__MODULE__, {auth_payload, from, phx_socket})
+  def join(topic, auth_payload, socket) do
+    %{"ref" => ref} = auth_payload
+    with {:ok, %{pid: pid}} <- Phoenix.LiveView.View.verify_token(socket.endpoint, ref),
+         :ok <- GenServer.call(pid, {:phoenix, :register_file_upload, %{pid: self(), ref: topic}}) do
+      {:ok, %{}, socket}
+    else
+      {:error, :limit_exceeded} -> {:error, %{reason: :limit_exceeded}}
+      _ -> {:error, %{reason: :invalid_token}}
+    end
   end
 
-  @impl true
-  def init(triplet) do
-    send(self(), {:join, __MODULE__})
-    {:ok, triplet}
-  end
-
-  @impl true
-  def handle_info({:join, __MODULE__}, {_, from, phx_socket} = state) do
-    GenServer.reply(from, {:ok, %{}})
-    {:noreply, phx_socket}
-  end
-
-  def handle_info(%Phoenix.Socket.Message{topic: topic, payload: {:frame, payload}, ref: ref} = msg, state) do
-    reply_ref = {state.transport_pid, state.serializer, state.topic, ref, state.join_ref}
-    Phoenix.Channel.reply(reply_ref, {:ok, %{file_ref: "1"}})
-    {:noreply, add_frame(state, payload)}
-  end
-
-  def handle_info(_, state) do
-    {:noreply, state}
+  def handle_in("event", {:frame, payload}, socket) do
+    {:reply, {:ok, %{file_ref: "1"}}, add_frame(socket, payload)}
   end
 
   defp add_frame(socket, frame) do
@@ -51,4 +40,11 @@ defmodule Phoenix.LiveView.UploadChannel do
     File.write(path, Enum.reverse(frames))
     {:reply, {:ok, path}, %{state | assigns: %{frames: []}}}
   end
+
+  def handle_call(:stop, _reply, state) do
+    IO.inspect :stopping
+    {:stop, :finished, state}
+  end
+
+  # TODO shutdown channel from the client on a liveview crash
 end

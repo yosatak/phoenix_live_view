@@ -21,7 +21,7 @@ defmodule Phoenix.LiveView.UploadChannel do
   end
 
   def handle_in("event", {:frame, payload}, socket) do
-    {:reply, {:ok, %{file_ref: "1"}}, add_frame(socket, payload)}
+    {:reply, {:ok, %{file_ref: socket.join_ref}}, add_frame(socket, payload)}
   end
 
   defp add_frame(socket, frame) do
@@ -36,14 +36,14 @@ defmodule Phoenix.LiveView.UploadChannel do
   @impl true
   def handle_call({:get_file, ref}, _reply, %{assigns: %{frames: frames}} = state) do
     # TODO: change this upload mechanism?
+    # TODO: Use helper function
     path = Plug.Upload.random_file!("multipart")
     File.write(path, Enum.reverse(frames))
     {:reply, {:ok, path}, %{state | assigns: %{frames: []}}}
   end
 
-  def handle_call(:stop, _reply, state) do
-    IO.inspect :stopping
-    {:stop, :finished, state}
+  def handle_cast(:stop, state) do
+    {:stop, :normal, state}
   end
 
   # TODO shutdown channel from the client on a liveview crash

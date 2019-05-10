@@ -235,35 +235,85 @@ let gatherFiles = (form) => {
 
 
 
-let uploadFiles = (files, channel, callback) => {
+let uploadFiles = (ctx, files, callback) => {
+  let numFiles = Object.keys(files).length;
+  let results = {};
+
+  // TODO: leaves channels on error and rejoins when main live view joins
+  // ctx.channel.onError(() => {
+  // uploadChannels.leave()
+  // }
+  // i
+  // onJoined(() => {
+  // uploadChannels.reJoin()
+  // }
   for(let key in files){
-    let file = files[key]
-    var reader = new FileReader()
-    reader.onload = function(e) {
-      // Todo: Chunk files
-      channel.push("file", {file: e.target.result})
-                  .receive("ok", callback)
-    }
-    reader.readAsArrayBuffer(file)
+    ctx.channel.push("get_upload_ref").receive("ok", ({ ref }) => {
+
+      const uploadChannel = ctx.liveSocket.channel(`lvu:${ctx.id}-${ctx.uploadCount++}`, () => {
+        return {session: ctx.getSession(), ref: ref}
+      });
+
+      // ctx.files.push(uploadChannel);
+
+      uploadChannel.join().receive("ok", (data) => {
+        let file = files[key]
+        var reader = new FileReader()
+        reader.onload = function(e) {
+          // Todo: Chunk files
+          uploadChannel.push("file", {file: e.target.result})
+            .receive("ok", (data) => {
+              console.log(key);
+              results[key] = Object.assign(data, { topic: uploadChannel.topic });
+              numFiles--;
+              if (numFiles === 0) {
+                callback(results);
+              }
+            })
+        }
+        reader.readAsArrayBuffer(file)
+      })
+    })
   }
 }
 
-let serializeForm = (form) => {
+// TODO: split formData and fileData
+let serializeForm = (form, fileUploadData) => {
   const formData = new FormData(form)
-  let files = {}
+  const fileData = [];
+  let toRemove = []
   let readerCount = 0
+
   formData.forEach((val, key) => {
-    if (val instanceof File && val.size > 0) {
-      formData.set(`${key}[name]`, val.name);
-      formData.set(`${key}[type]`, val.type);
-      formData.set(`${key}[size]`, val.size);
-      formData.set(`${key}[__PHX_FILE__]`, "some_ref");
+    if (val instanceof File) {
+      toRemove.push(key);
+      const fileWithMeta = {path: key};
+      if (val.size > 0) {
+        fileWithMeta.name = val.name;
+        fileWithMeta.type = val.type;
+        fileWithMeta.size = val.size;
+
+        if (fileUploadData) {
+          fileWithMeta.file_ref = fileUploadData[key]["file_ref"];
+          fileWithMeta.topic = fileUploadData[key]["topic"];
+        }
+        fileData.push(fileWithMeta);
+      }
     }
   })
 
+  toRemove.forEach((key) => {
+    console.log(key);
+    formData.delete(key);
+  });
+
   let params = new URLSearchParams()
   for(let [key, val] of formData.entries()){ params.append(key, val) }
-  return params.toString()
+
+  return {
+    formData: return params.toString(),
+    fileData: fileData.length > 0 ? fileData : null
+  };
 }
 
 let recursiveMerge = (target, source) => {
@@ -1230,35 +1280,32 @@ export class View {
   }
 
   pushInput(inputEl, phxEvent){
-    this.pushWithReply("event", {
-      type: "form",
-      event: phxEvent,
-      value: serializeForm(inputEl.form)
-    })
+    const { fileData, formData } = serializeForm(inputEl.form);
+    console.log(fileData);
+    const event = { type: "form", event: phxEvent, value: formData };
+    if (!fileData) {
+      this.pushWithReply("event", event);
+      return;
+    }
+    this.pushWithReply("event", Object.assign({}, event, {file_data: fileData}));
   }
 
   pushFormSubmit(formEl, phxEvent, onReply){
     this.uploadCount = 0;
     let files = gatherFiles(formEl)
-    if (Object.keys(files).length > 0) {
-      this.channel.push("get_upload_ref").receive("ok", ({ ref }) => {
-        const uploadChannel = this.liveSocket.channel(`lvu:${this.id}${this.uploadCount++}`, () => {
-          return {session: this.getSession(), ref: ref}
-        })
-
-        uploadChannel.join().receive("ok", () => {
-          // start upload
-          uploadFiles(files, uploadChannel, ({ file_ref }) => {
+    let numFiles = Object.keys(files).length;
+    if (numFiles > 0) {
+      uploadFiles(this, files, (uploads) => {
+        const { formData, fileData} = serializeForm(formEl, uploads);
             this.pushWithReply("event", {
               type: "form",
-              upload_channel: uploadChannel.topic,
-              file_ref,
+              file_count: numFiles,
+              // file_data: ...
               event: phxEvent,
-              value: serializeForm(formEl)
+              value: formData,
+              file_data: fileData
             }, onReply)
           })
-      });
-      });
       // lock form
       // upload files
       // submit

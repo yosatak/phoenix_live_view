@@ -84,21 +84,43 @@ defmodule Phoenix.LiveView.Channel do
     {:noreply, state}
   end
 
+  def handle_info(%Message{topic: topic, event: "event", payload: %{"file_data" => _}} = msg, %{topic: topic} = state) do
+    %{"file_data" => file_data, "value" => raw_val, "event" => event, "type" => type} = msg.payload
+    val = decode(type, raw_val)
+    {val, upload_channels} =
+      Enum.reduce(file_data, {val, []}, fn fd, {val_acc, upload_chans} = acc ->
+        {path, meta} = Map.pop(fd, "path")
+        meta = Map.take(fd, ["name", "size", "type"])
+        case Map.get(state.uploads, fd["topic"]) do
+          pid when is_pid(pid) ->
+            {:ok, file_path} = GenServer.call(pid, {:get_file, fd["ref"]})
+            meta = Map.put(meta, "path", file_path)
+            {Plug.Conn.Query.decode_pair({path, meta}, val_acc), [pid | upload_chans]}
+
+          _ ->
+          {Plug.Conn.Query.decode_pair({path, meta}, val_acc), upload_chans}
+
+        end
+      end)
+
+    try do
+      view_module(state).handle_event(event, val, state.socket)
+    else
+      {:noreply, %Socket{} = new_socket} ->
+        {:noreply, reply_render(state, new_socket, msg.ref)}
+
+      result ->
+        handle_result(result, {:handle_event, 3}, state)
+    after
+      Enum.map(upload_channels, &GenServer.cast(&1, :stop))
+    end
+  end
+
+  def handle_info(%Message{topic: topic, event: "event"} = msg, %{topic: topic} = state) do
+
   def handle_info(%Message{topic: topic, event: "event"} = msg, %{topic: topic} = state) do
     %{"value" => raw_val, "event" => event, "type" => type} = msg.payload
     val = decode(type, state.socket.router, raw_val)
-
-    {val, state} =
-      case msg.payload do
-        %{"file_ref" => file_ref, "upload_channel" => topic} ->
-          {pid, uploads} = Map.pop(state.uploads, topic)
-           {:ok, path} = GenServer.call(pid, {:get_file, file_ref})
-
-           # TODO: find/replace the file ref (__PHX_FILE__)
-           subpath = find_file(val, file_ref, [])
-           {put_in(val, subpath ++ ["path"], path), %{state | uploads: uploads}}
-        _ -> {val, state}
-      end
 
 
     event
@@ -120,8 +142,8 @@ defmodule Phoenix.LiveView.Channel do
   def handle_call({@prefix, :register_file_upload, %{pid: pid, ref: ref}}, _from, state) do
     Process.monitor(pid)
     # TODO: get that from config
-    if (Enum.count(state.uploads)) > 0 do
-      {:error, :limit_exceeded}
+    if (Enum.count(state.uploads)) > 3 do
+      {:reply. {:error, :limit_exceeded}, state}
     else
       state = %{state | uploads: Map.put(state.uploads, ref, pid)}
       {:reply, :ok, state}
@@ -592,15 +614,22 @@ defmodule Phoenix.LiveView.Channel do
     %{state | socket: View.post_mount_prune(socket)}
 
   @doc false
-  def find_file(%{"__PHX_FILE__" => ref}, _ref, path), do: Enum.reverse(path)
-  def find_file(params, _ref, path) when not is_map(params), do: nil
+  def find_files(params, ref, nil) do
+    find_files(params, ref, {[], []}) |> elem(1) |> Enum.reverse()
+  end
 
-  def find_file(params, _ref, path) do
-    Enum.reduce_while(params, path, fn {key, sub_params}, acc ->
-      case find_file(sub_params, _ref, [key | acc]) do
-        nil -> {:cont, acc}
-        path -> {:halt, path}
+  def find_files(%{"__PHX_FILE__" => ref1}, _ref, {path, _}), do: {:ok, {Enum.reverse(path), ref1}}
+  def find_files(params, _ref, _path) when not is_map(params), do: nil
+
+  def find_files(params, _ref, {path, acc}) do
+    Enum.reduce(params, {path, acc}, fn {key, sub_params}, {path_acc, found_acc} ->
+      next_path = [key | path_acc]
+      case find_files(sub_params, _ref, {next_path, found_acc}) do
+        {:ok, path} -> {path_acc, [path | found_acc]}
+        nil -> {path_acc, found_acc}
+        other -> other
       end
     end)
   end
+
 end

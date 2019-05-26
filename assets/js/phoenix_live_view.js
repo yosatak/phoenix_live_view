@@ -251,27 +251,60 @@ let uploadFiles = (ctx, files, callback) => {
     ctx.channel.push("get_upload_ref").receive("ok", ({ ref }) => {
 
       const uploadChannel = ctx.liveSocket.channel(`lvu:${ctx.id}-${ctx.uploadCount++}`, () => {
-        return {session: ctx.getSession(), ref: ref}
+        return {session: ctx.getSession(), ref}
       });
 
       // ctx.files.push(uploadChannel);
 
       uploadChannel.join().receive("ok", (data) => {
         let file = files[key]
-        var reader = new FileReader()
-        reader.onload = function(e) {
-          // Todo: Chunk files
-          uploadChannel.push("file", {file: e.target.result})
+        const uploadChunk = (chunk, finished, uploaded) => {
+          if (!finished) {
+            ctx.channel.push("upload_progress", {path: key, size: file.size, uploaded})
+              .receive("ok", diff => {
+                ctx.update(diff)
+              })
+          }
+
+          uploadChannel.push("file", {file: chunk})
             .receive("ok", (data) => {
-              console.log(key);
-              results[key] = Object.assign(data, { topic: uploadChannel.topic });
-              numFiles--;
-              if (numFiles === 0) {
-                callback(results);
+              if (finished) {
+                results[key] = Object.assign(data, { topic: uploadChannel.topic });
+                numFiles--;
+                if (numFiles === 0) {
+                  callback(results);
+                }
               }
             })
         }
-        reader.readAsArrayBuffer(file)
+
+        const fileSize   = file.size;
+        let chunkSize  = 64 * 1024; // bytes
+        let offset     = 0;
+        var chunkReaderBlock = null;
+
+        var readEventHandler = function(e) {
+          if (e.target.error === null) {
+            const done = offset >= file.size;
+            offset += e.target.result.byteLength;
+            uploadChunk(e.target.result, done, offset);
+            if (!done) {
+              setTimeout(() => chunkReaderBlock(offset, chunkSize, file), 100);
+            }
+          } else {
+            console.log("Read error: " + e.target.error);
+            return;
+          }
+        }
+
+        chunkReaderBlock = function(_offset, length, _file) {
+          var r = new FileReader();
+          var blob = _file.slice(_offset, length + _offset);
+          r.onload = readEventHandler;
+          r.readAsArrayBuffer(blob);
+        }
+
+        chunkReaderBlock(offset, chunkSize, file);
       })
     })
   }
@@ -303,7 +336,6 @@ let serializeForm = (form, fileUploadData) => {
   })
 
   toRemove.forEach((key) => {
-    console.log(key);
     formData.delete(key);
   });
 
@@ -1281,7 +1313,6 @@ export class View {
 
   pushInput(inputEl, phxEvent){
     const { fileData, formData } = serializeForm(inputEl.form);
-    console.log(fileData);
     const event = { type: "form", event: phxEvent, value: formData };
     if (!fileData) {
       this.pushWithReply("event", event);
@@ -1306,9 +1337,6 @@ export class View {
               file_data: fileData
             }, onReply)
           })
-      // lock form
-      // upload files
-      // submit
     } else {
       this.pushWithReply("event", {
         type: "form",

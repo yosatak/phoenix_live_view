@@ -429,29 +429,27 @@ function writeBinaryString(view, string, offset) {
 
 function binaryEncode(message , cb) {
   const { join_ref, ref, topic, payload: { file } } = message
-  const headerLength = 2;
-  const metaLength = 3 + join_ref.length + ref.length + topic.length;
-  const fileLength = file.byteLength;
-  const buffer = new ArrayBuffer(headerLength + metaLength + fileLength);
+  const headerLength = 2
+  const metaLength = 3 + join_ref.length + ref.length + topic.length
+  const fileLength = file.byteLength
+  const header = new ArrayBuffer(headerLength + metaLength)
 
 
-  const view = new DataView(buffer);
-  view.setUint8(0, 0) // TODO: consider parts here
+  const view = new DataView(header)
+  view.setUint8(0, 0)
   view.setUint8(1, 1)
   view.setUint8(2, join_ref.length)
   view.setUint8(3, ref.length)
   view.setUint8(4, topic.length)
-  let offset = writeBinaryString(view, join_ref, 5);
-  offset = writeBinaryString(view, ref, offset);
-  offset = writeBinaryString(view, topic, offset);
+  let offset = writeBinaryString(view, join_ref, 5)
+  offset = writeBinaryString(view, ref, offset)
+  offset = writeBinaryString(view, topic, offset)
 
-  let i = 0;
-  const arr = new Uint8Array(file);
-  for (0; i < file.byteLength; i++) {
-    view.setUint8(offset + i, arr[i]);
-  }
+  var combined = new Uint8Array(header.byteLength + fileLength)
+  combined.set(new Uint8Array(header), 0)
+  combined.set(new Uint8Array(file), header.byteLength)
 
-  cb(view.buffer);
+  cb(combined.buffer)
 }
 
 

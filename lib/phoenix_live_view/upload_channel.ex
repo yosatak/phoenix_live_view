@@ -11,8 +11,17 @@ defmodule Phoenix.LiveView.UploadChannel do
 
   def join(topic, auth_payload, socket) do
     %{"ref" => ref} = auth_payload
+
     with {:ok, %{pid: pid}} <- Phoenix.LiveView.View.verify_token(socket.endpoint, ref),
-         :ok <- GenServer.call(pid, {:phoenix, :register_file_upload, %{pid: self(), ref: topic}}) do
+         :ok <-
+           GenServer.call(pid, {:phoenix, :register_file_upload, %{pid: self(), ref: topic}}),
+         {:ok, path} <- Plug.Upload.random_file("live_view_upload"),
+         {:ok, handle} <- File.open(path, [:binary, :write]) do
+      socket =
+        socket
+        |> Phoenix.Socket.assign(:path, path)
+        |> Phoenix.Socket.assign(:handle, handle)
+
       {:ok, %{}, socket}
     else
       {:error, :limit_exceeded} -> {:error, %{reason: :limit_exceeded}}
@@ -21,29 +30,18 @@ defmodule Phoenix.LiveView.UploadChannel do
   end
 
   def handle_in("event", {:frame, payload}, socket) do
-    {:reply, {:ok, %{file_ref: socket.join_ref}}, add_frame(socket, payload)}
-  end
-
-  defp add_frame(socket, frame) do
-    frames =
-      case socket.assigns do
-        %{frames: frames} -> [frame | frames]
-        _ -> [frame]
-      end
-    Phoenix.Socket.assign(socket, :frames, frames)
+    IO.binwrite(socket.assigns.handle, payload)
+    {:reply, {:ok, %{file_ref: socket.join_ref}}, socket}
   end
 
   @impl true
-  def handle_call({:get_file, ref}, _reply, %{assigns: %{frames: frames}} = state) do
-    # TODO: change this upload mechanism?
-    # TODO: Use helper function
-    path = Plug.Upload.random_file!("multipart")
-    File.write(path, Enum.reverse(frames))
-    {:reply, {:ok, path}, %{state | assigns: %{frames: []}}}
+  def handle_call({:get_file, ref}, _reply, socket) do
+    File.close(socket.assigns.handle)
+    {:reply, {:ok, socket.assigns.path}, socket}
   end
 
-  def handle_cast(:stop, state) do
-    {:stop, :normal, state}
+  def handle_cast(:stop, socket) do
+    {:stop, :normal, socket}
   end
 
   # TODO shutdown channel from the client on a liveview crash

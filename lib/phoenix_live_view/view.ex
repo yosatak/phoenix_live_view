@@ -548,7 +548,10 @@ defmodule Phoenix.LiveView.View do
 
   defp random_id, do: "phx-" <> random_encoded_bytes()
 
-  defp sign_token(endpoint_mod, salt, data) do
+  @doc """
+  TODO
+  """
+  def sign_token(endpoint_mod, salt, data) do
     Phoenix.Token.sign(endpoint_mod, salt, {@token_vsn, data})
   end
 
@@ -560,4 +563,6 @@ defmodule Phoenix.LiveView.View do
   defp child?(%Socket{parent_pid: pid}), do: is_pid(pid)
 
   defp mounted?(%Socket{mounted: mounted}), do: mounted
+
+  def token_vsn(), do: @token_vsn
 end

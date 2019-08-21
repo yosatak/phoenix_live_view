@@ -45,7 +45,7 @@ defmodule Phoenix.LiveView.Channel do
         new_ids = Map.delete(state.children_ids, id)
         {:noreply, %{state | children_pids: new_pids, children_ids: new_ids}}
 
-      entry = Enum.find(state.uploads, &match?({_, maybe_child_pid}, &1)) ->
+      entry = Enum.find(state.uploads, &match?({_, ^maybe_child_pid}, &1)) ->
         {key, _} = entry
         new_uploads = Map.delete(state.uploads, key)
         {:noreply, %{state | uploads: new_uploads}}
@@ -79,7 +79,7 @@ defmodule Phoenix.LiveView.Channel do
   end
 
   def handle_info(%Message{topic: topic, event: "get_upload_ref"} = msg, %{topic: topic} = state) do
-    response = Phoenix.Token.sign(state.socket.endpoint, Phoenix.LiveView.View.configured_signing_salt!(state.socket.endpoint), %{pid: self()})
+    response = View.sign_token(state.socket.endpoint, View.configured_signing_salt!(state.socket.endpoint), %{pid: self()})
     reply(state, msg.ref, :ok, %{ref: response})
     {:noreply, state}
   end
@@ -88,18 +88,15 @@ defmodule Phoenix.LiveView.Channel do
     %{"path" => path, "size" => size, "uploaded" => uploaded} = msg.payload
     event = "upload_progress"
     val = Plug.Conn.Query.decode_pair({path, %{"size" => size, "uploaded" => uploaded}}, %{})
-    case view_module(state).handle_event(event, val, state.socket) do
-      {:noreply, %Socket{} = new_socket} ->
-        {:noreply, reply_render(state, new_socket, msg.ref)}
 
-      result ->
-        handle_result(result, {:handle_event, 3}, state)
-    end
+    event
+    |> view_module(state).handle_event(val, state.socket)
+    |> handle_result({:handle_event, 3, msg.ref}, state)
   end
 
   def handle_info(%Message{topic: topic, event: "event", payload: %{"file_data" => _}} = msg, %{topic: topic} = state) do
     %{"file_data" => file_data, "value" => raw_val, "event" => event, "type" => type} = msg.payload
-    val = decode(type, raw_val)
+    val = decode(type, state.socket.router, raw_val)
     {val, upload_channels} =
       Enum.reduce(file_data, {val, []}, fn fd, {val_acc, upload_chans} = acc ->
         {path, meta} = Map.pop(fd, "path")
@@ -117,24 +114,17 @@ defmodule Phoenix.LiveView.Channel do
       end)
 
     try do
-      view_module(state).handle_event(event, val, state.socket)
-    else
-      {:noreply, %Socket{} = new_socket} ->
-        {:noreply, reply_render(state, new_socket, msg.ref)}
-
-      result ->
-        handle_result(result, {:handle_event, 3}, state)
+      event
+      |> view_module(state).handle_event(val, state.socket)
+      |> handle_result({:handle_event, 3, msg.ref}, state)
     after
       Enum.map(upload_channels, &GenServer.cast(&1, :stop))
     end
   end
 
   def handle_info(%Message{topic: topic, event: "event"} = msg, %{topic: topic} = state) do
-
-  def handle_info(%Message{topic: topic, event: "event"} = msg, %{topic: topic} = state) do
     %{"value" => raw_val, "event" => event, "type" => type} = msg.payload
     val = decode(type, state.socket.router, raw_val)
-
 
     event
     |> view_module(state).handle_event(val, state.socket)
@@ -559,7 +549,6 @@ defmodule Phoenix.LiveView.Channel do
     put_uri(%{
       socket: lv_socket,
       uploads: %{},
-      fingerprints: nil,
       serializer: phx_socket.serializer,
       topic: phx_socket.topic,
       transport_pid: phx_socket.transport_pid,
@@ -625,6 +614,7 @@ defmodule Phoenix.LiveView.Channel do
 
   defp post_mount_prune(%{socket: socket} = state) do
     %{state | socket: View.post_mount_prune(socket)}
+  end
 
   @doc false
   def find_files(params, ref, nil) do
@@ -644,5 +634,4 @@ defmodule Phoenix.LiveView.Channel do
       end
     end)
   end
-
 end

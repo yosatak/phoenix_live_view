@@ -260,10 +260,7 @@ let uploadFiles = (ctx, files, callback) => {
         let file = files[key]
         const uploadChunk = (chunk, finished, uploaded) => {
           if (!finished) {
-            ctx.channel.push("upload_progress", {path: key, size: file.size, uploaded})
-              .receive("ok", diff => {
-                ctx.update(diff)
-              })
+            ctx.pushWithReply("upload_progress", {path: key, size: file.size, uploaded})
           }
 
           uploadChannel.push("file", {file: chunk})
@@ -343,7 +340,7 @@ let serializeForm = (form, fileUploadData) => {
   for(let [key, val] of formData.entries()){ params.append(key, val) }
 
   return {
-    formData: return params.toString(),
+    formData: params.toString(),
     fileData: fileData.length > 0 ? fileData : null
   };
 }
@@ -974,6 +971,7 @@ let DOM = {
           return false
         }
 
+
         // file upload
         if (fromEl.nodeName === "INPUT" && toEl.nodeName === "INPUT" && fromEl.type === "file") {
           return false;
@@ -1067,10 +1065,6 @@ export class View {
         session: this.getSession(),
         static: this.getStatic()
       }
-    })
-
-    this.uploadChannel = this.liveSocket.channel(`lvu:${this.id}`, () => {
-      return {session: this.getSession()}
     })
 
     this.loaderTimer = setTimeout(() => this.showLoader(), LOADER_TIMEOUT)

@@ -4,10 +4,7 @@ defmodule Phoenix.LiveView.UploadChannel do
 
   require Logger
 
-  alias Phoenix.LiveView
-  alias Phoenix.LiveView.{Socket, View, Diff}
-
-  alias Phoenix.LiveView.UploadFrame
+  alias Phoenix.LiveView.View
 
   def join(topic, auth_payload, socket) do
     %{"ref" => ref} = auth_payload

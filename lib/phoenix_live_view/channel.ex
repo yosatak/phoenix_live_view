@@ -85,9 +85,9 @@ defmodule Phoenix.LiveView.Channel do
   end
 
   def handle_info(%Message{topic: topic, event: "upload_progress"} = msg, %{topic: topic} = state) do
-    %{"path" => path, "size" => size, "uploaded" => uploaded} = msg.payload
+    %{"path" => path} = msg.payload
     event = "upload_progress"
-    val = Plug.Conn.Query.decode_pair({path, %{"size" => size, "uploaded" => uploaded}}, %{})
+    val = Plug.Conn.Query.decode_pair({path, Map.take(msg.payload, ["size", "uploaded", "percentage"])}, %{})
 
     event
     |> view_module(state).handle_event(val, state.socket)
@@ -103,7 +103,7 @@ defmodule Phoenix.LiveView.Channel do
         meta = Map.take(fd, ["name", "size", "type"])
         case Map.get(state.uploads, fd["topic"]) do
           pid when is_pid(pid) ->
-            {:ok, file_path} = GenServer.call(pid, {:get_file, fd["ref"]})
+            {:ok, file_path} = GenServer.call(pid, {:get_file, fd["file_ref"]})
             meta = Map.put(meta, "path", file_path)
             {Plug.Conn.Query.decode_pair({path, meta}, val_acc), [pid | upload_chans]}
 
@@ -145,8 +145,8 @@ defmodule Phoenix.LiveView.Channel do
   def handle_call({@prefix, :register_file_upload, %{pid: pid, ref: ref}}, _from, state) do
     config = [
       upload_limit: 3,
-      file_size_limit: 100_000,
-      chunk_size: 4_000,
+      file_size_limit: 100_000_000,
+      chunk_size: 64_000,
     ]
 
     Process.monitor(pid)

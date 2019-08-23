@@ -143,13 +143,20 @@ defmodule Phoenix.LiveView.Channel do
   end
 
   def handle_call({@prefix, :register_file_upload, %{pid: pid, ref: ref}}, _from, state) do
+    config = [
+      upload_limit: 3,
+      file_size_limit: 100_000,
+      chunk_size: 4_000,
+    ]
+
     Process.monitor(pid)
     # TODO: get that from config
-    if (Enum.count(state.uploads)) > 3 do
+    if (Enum.count(state.uploads)) > Keyword.fetch!(config, :upload_limit) do
       {:reply. {:error, :limit_exceeded}, state}
     else
       state = %{state | uploads: Map.put(state.uploads, ref, pid)}
-      {:reply, :ok, state}
+      reply = Keyword.take(config, [:file_size_limit, :chunk_size]) |> Map.new()
+      {:reply, {:ok, reply}, state}
     end
   end
 

@@ -256,6 +256,13 @@ let uploadFiles = (ctx, files, callback) => {
 
       // ctx.files.push(uploadChannel);
 
+      const chunkReaderBlock = function(_offset, length, _file, handler) {
+        var r = new window.FileReader();
+        var blob = _file.slice(_offset, length + _offset);
+        r.onload = handler;
+        r.readAsArrayBuffer(blob);
+      }
+
       uploadChannel.join().receive("ok", (data) => {
         let file = files[key]
         const uploadChunk = (chunk, finished, uploaded) => {
@@ -276,17 +283,16 @@ let uploadFiles = (ctx, files, callback) => {
         }
 
         const fileSize   = file.size;
-        let chunkSize  = 64 * 1024; // bytes
+        const { chunkSize } = data;
         let offset     = 0;
-        var chunkReaderBlock = null;
 
-        var readEventHandler = function(e) {
+        const readEventHandler = function(e) {
           if (e.target.error === null) {
             const done = offset >= file.size;
             offset += e.target.result.byteLength;
             uploadChunk(e.target.result, done, offset);
             if (!done) {
-              setTimeout(() => chunkReaderBlock(offset, chunkSize, file), 100);
+              setTimeout(() => chunkReaderBlock(offset, chunkSize, file, readEventHandler), 100);
             }
           } else {
             console.log("Read error: " + e.target.error);
@@ -294,14 +300,7 @@ let uploadFiles = (ctx, files, callback) => {
           }
         }
 
-        chunkReaderBlock = function(_offset, length, _file) {
-          var r = new FileReader();
-          var blob = _file.slice(_offset, length + _offset);
-          r.onload = readEventHandler;
-          r.readAsArrayBuffer(blob);
-        }
-
-        chunkReaderBlock(offset, chunkSize, file);
+        chunkReaderBlock(offset, chunkSize, file, readEventHandler);
       })
     })
   }

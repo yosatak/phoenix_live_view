@@ -17,10 +17,14 @@ defmodule Phoenix.LiveView.UploadChannel do
            GenServer.call(pid, {:phoenix, :register_file_upload, %{pid: self(), ref: topic}}),
          {:ok, path} <- Plug.Upload.random_file("live_view_upload"),
          {:ok, handle} <- File.open(path, [:binary, :write]) do
+
+      Process.monitor(pid)
+
       socket =
         socket
         |> Phoenix.Socket.assign(:path, path)
         |> Phoenix.Socket.assign(:handle, handle)
+        |> Phoenix.Socket.assign(:live_view_pid, pid)
 
       {:ok, %{}, socket}
     else
@@ -44,5 +48,11 @@ defmodule Phoenix.LiveView.UploadChannel do
     {:stop, :normal, socket}
   end
 
-  # TODO shutdown channel from the client on a liveview crash
+  def handle_info(
+        {:DOWN, _, _, live_view_pid, reason},
+        %{assigns: %{live_view_pid: livd_view_pid}} = state
+      ) do
+    reason = if reason == :normal, do: {:shutdown, :closed}, else: reason
+    {:stop, reason, state}
+  end
 end

@@ -622,23 +622,4 @@ defmodule Phoenix.LiveView.Channel do
   defp post_mount_prune(%{socket: socket} = state) do
     %{state | socket: View.post_mount_prune(socket)}
   end
-
-  @doc false
-  def find_files(params, ref, nil) do
-    find_files(params, ref, {[], []}) |> elem(1) |> Enum.reverse()
-  end
-
-  def find_files(%{"__PHX_FILE__" => ref1}, _ref, {path, _}), do: {:ok, {Enum.reverse(path), ref1}}
-  def find_files(params, _ref, _path) when not is_map(params), do: nil
-
-  def find_files(params, _ref, {path, acc}) do
-    Enum.reduce(params, {path, acc}, fn {key, sub_params}, {path_acc, found_acc} ->
-      next_path = [key | path_acc]
-      case find_files(sub_params, _ref, {next_path, found_acc}) do
-        {:ok, path} -> {path_acc, [path | found_acc]}
-        nil -> {path_acc, found_acc}
-        other -> other
-      end
-    end)
-  end
 end

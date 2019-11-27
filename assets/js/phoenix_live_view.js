@@ -319,18 +319,29 @@ export class LiveSocket {
     Browser.fetchPage(href, (status, html) => {
       if(status !== 200){ return Browser.redirect(href) }
 
-      let div = document.createElement("div")
-      div.innerHTML = html
-      this.joinView(div.firstChild, null, href, newMain => {
+      let parser = new DOMParser()
+      let content = parser.parseFromString(html, "text/html")
+
+      this.joinView(content.firstChild, null, href, newMain => {
         if(!this.commitPendingLink(linkRef)){
           newMain.destroy()
           return
         }
         callback && callback()
         this.destroyViewById(mainID)
-        mainEl.replaceWith(newMain.el)
+
+        if(newMain.el.tagName === "HTML"){
+          DOM.mergeAttrs(mainEl, newMain.el)
+          document.title = maybe(newMain.el.querySelector("title"), n => n.innerText)
+          document.body.replaceWith(newMain.el.querySelector("body"))
+          newMain.el = mainEl
+        } else {
+          mainEl.replaceWith(newMain.el)
+        }
+
         this.main = newMain
-        if(wasLoading){ this.main.showLoader() }
+        this.main.hideLoader()
+        // if(wasLoading){ this.main.showLoader() }
       })
     })
   }
@@ -1042,6 +1053,7 @@ export class View {
   }
 
   update(diff, cid){
+    console.log(diff)
     if(isEmpty(diff)){ return }
     if(this.liveSocket.hasPendingLink()){ return this.pendingDiffs.push({diff, cid}) }
 
@@ -1146,9 +1158,9 @@ export class View {
     }
     this.channel.join()
       .receive("ok", data => {
+        this.onJoin(data)
         if(!this.joinedOnce){ callback && callback(this) }
         this.joinedOnce = true
-        this.onJoin(data)
       })
       .receive("error", resp => this.onJoinError(resp))
       .receive("timeout", () => this.onJoinError("timeout"))

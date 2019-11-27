@@ -32,12 +32,12 @@ defmodule Phoenix.LiveView.Controller do
   """
   def live_render(%Plug.Conn{} = conn, view, opts \\ []) do
     case LiveView.Static.render(conn, view, opts) do
-      {:ok, content} ->
+      {:ok, {assigns, content}} ->
         conn
         |> Plug.Conn.assign(:live_view_module, view)
         |> Phoenix.Controller.put_view(LiveView.Static)
         |> LiveView.Plug.put_cache_headers()
-        |> Phoenix.Controller.render("template.html", %{content: content})
+        |> Phoenix.Controller.render("template.html", Map.merge(assigns, %{content: content}))
 
       {:stop, {:redirect, opts}} ->
         Phoenix.Controller.redirect(conn, to: Map.fetch!(opts, :to))

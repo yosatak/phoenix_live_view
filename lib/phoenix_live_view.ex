@@ -1315,6 +1315,13 @@ defmodule Phoenix.LiveView do
   end
 
   @doc """
+  TODO
+  """
+  def put_layout(%Socket{} = socket, view, template) do
+    %Socket{socket | layout: {view, template}}
+  end
+
+  @doc """
   Annotates the socket for redirect to a destination path.
 
   *Note*: LiveView redirects rely on instructing client

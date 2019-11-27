@@ -67,7 +67,7 @@ defmodule Phoenix.LiveView.Utils do
   def to_rendered(socket, view) do
     assigns = Map.put(socket.assigns, :socket, socket)
 
-    case view.render(assigns) do
+    case view_render(socket.layout, view, assigns) do
       %LiveView.Rendered{} = rendered ->
         rendered
 
@@ -83,6 +83,15 @@ defmodule Phoenix.LiveView.Utils do
 
         """
     end
+  end
+
+  defp view_render({mod, template} = _layout, view, assigns) do
+    assigns = Map.merge(assigns, %{inner_content: view.render(assigns)})
+    mod.render(template, assigns)
+  end
+
+  defp view_render(nil, view, assigns) do
+    view.render(assigns)
   end
 
   @doc """

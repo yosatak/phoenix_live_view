@@ -1,6 +1,6 @@
 # Phoenix LiveView With Guardian
-*DON'T MERGE/USE MAINLINE*
-*THIS REPOSITORY AS A TEMPORARY FIX*
+**DON'T MERGE/USE MAINLINE**
+**THIS REPOSITORY AS A TEMPORARY FIX**
 
 ![Actions Status](https://github.com/phoenixframework/phoenix_live_view/workflows/CI/badge.svg)
 
